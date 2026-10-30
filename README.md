@@ -2,7 +2,7 @@
 
 An [Oh My Pi](https://omp.sh) plugin that starts each Vercel AI Gateway conversation on the fastest provider for its model. It works in any terminal and adapts to [Tern](https://stencil.so/tern)'s native view.
 
-![/fastcel ranking the providers of deepseek/deepseek-v4.1-flash, fastest first, with a bar for each one's speed](assets/fastcel-panel.png)
+![/fastcel ranking the providers of deepseek/deepseek-v4.1-flash-1017, fastest first, with a bar for each one's speed](assets/fastcel-panel.png)
 
 Vercel AI Gateway serves many models through several providers, and their speeds differ a lot. `deepseek/deepseek-v4.1-flash` has 22 providers. On one afternoon the fastest, runware, produced a median of 370 tokens per second over the last hour, and the slowest, vertex, 24. Left to choose, the gateway sent two test requests to baseten (239 tok/s). With fastcel the same request went to runware.
 
