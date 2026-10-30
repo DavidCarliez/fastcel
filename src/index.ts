@@ -59,7 +59,7 @@ export default async function fastcel(pi: ExtensionAPI): Promise<void> {
 			const modelStats = pinned ? undefined : await stats.get(endpointsUrl(origin, model.id));
 			if (!sameModel(ctx.models.current(), model)) return;
 			const ranking = modelStats && rankProviders(modelStats.endpoints, { tools: true });
-			showIndicator(ctx, indicatorText(pinned, ranking));
+			showIndicator(ctx, indicatorText(model.id, pinned, ranking));
 		}, 0);
 	};
 	pi.on("session_start", (_event, ctx) => showPickEarly(ctx));
@@ -88,9 +88,9 @@ export default async function fastcel(pi: ExtensionAPI): Promise<void> {
 		}
 
 		const pinned = pinnedRouting(model);
+		const modelId = typeof payload.model === "string" ? payload.model : model.id;
 		let ranking: RankedProvider[] | undefined;
 		if (!pinned) {
-			const modelId = typeof payload.model === "string" ? payload.model : model.id;
 			const modelStats = await stats.get(endpointsUrl(origin, modelId));
 			ranking =
 				modelStats &&
@@ -99,7 +99,7 @@ export default async function fastcel(pi: ExtensionAPI): Promise<void> {
 					contextTokens: ctx.getContextUsage()?.tokens,
 				});
 		}
-		if (ownsIndicator) showIndicator(ctx, indicatorText(pinned, ranking));
+		if (ownsIndicator) showIndicator(ctx, indicatorText(modelId, pinned, ranking));
 
 		// With fewer than two providers there is nothing to choose; Vercel's default is the only option.
 		const routing = pinned ?? (ranking && ranking.length > 1 ? { order: ranking.map(entry => entry.provider) } : undefined);
@@ -194,11 +194,21 @@ function pinnedRouting(model: Model): PinnedRouting | undefined {
 	return undefined;
 }
 
-function indicatorText(pinned: PinnedRouting | undefined, ranking: RankedProvider[] | undefined): string | undefined {
+/**
+ * `fastcel → provider togetherai · 187 tok/s`. A provider that shares its slug with the model's maker, such as
+ * `deepseek` for `deepseek/…`, is the maker's own API; the label says so, since its name reads like the model's.
+ */
+function indicatorText(
+	modelId: string,
+	pinned: PinnedRouting | undefined,
+	ranking: RankedProvider[] | undefined,
+): string | undefined {
 	if (pinned) return `fastcel: pinned ${describePin(pinned)}`;
 	const leader = ranking?.[0];
 	if (!leader) return undefined;
-	return `fastcel → ${leader.provider}${leader.tps === undefined ? "" : ` ${Math.round(leader.tps)} tok/s`}`;
+	const firstParty = leader.provider === modelId.split("/")[0] ? " (first-party)" : "";
+	const speed = leader.tps === undefined ? "" : ` · ${Math.round(leader.tps)} tok/s`;
+	return `fastcel → provider ${leader.provider}${firstParty}${speed}`;
 }
 
 function describePin(pinned: PinnedRouting): string {
@@ -216,7 +226,10 @@ function formatRanking(modelId: string, modelStats: ModelStats, ranking: RankedP
 		const ttft = entry.ttftMs === undefined ? "n/a" : `${Math.round(entry.ttftMs)} ms`;
 		const uptime = entry.uptime15m === undefined ? "n/a" : `${entry.uptime15m.toFixed(1)}%`;
 		const demotion = entry.demotion ? `  [${entry.demotion}]` : "";
-		lines.push(`${String(index + 1).padStart(2)}. ${entry.provider.padEnd(width)} ${tps}  ttft ${ttft.padStart(7)}  up ${uptime}${demotion}`);
+		const firstParty = entry.provider === modelId.split("/")[0] ? "  (first-party)" : "";
+		lines.push(
+			`${String(index + 1).padStart(2)}. ${entry.provider.padEnd(width)} ${tps}  ttft ${ttft.padStart(7)}  up ${uptime}${demotion}${firstParty}`,
+		);
 	}
 	if (ranking.length === 1) lines.push("Only one provider serves this model; there is nothing to choose.");
 	return lines;

@@ -49,8 +49,10 @@ You need a Vercel AI Gateway key configured for OMP's `vercel-ai-gateway` provid
 Pick any Vercel AI Gateway model, with `/model` or `--model vercel-ai-gateway/deepseek/deepseek-v4.1-flash`. fastcel shows the top of its current ranking under the status line, or, in Tern's native view, on a row under the composer:
 
 ```
-fastcel → runware 370 tok/s
+fastcel → provider runware · 370 tok/s
 ```
+
+When the model's maker serves it from its own API, that provider has the maker's name, so the line marks it first-party. `fastcel → provider deepseek (first-party) · 191 tok/s` means DeepSeek's own API, not the DeepSeek model.
 
 A conversation that started earlier can still be on another provider, as described above. `/fastcel` shows where the last reply actually went.
 
@@ -69,7 +71,7 @@ fastcel · deepseek/deepseek-v4.1-flash · live stats, 1 min old
  3. baseten         239 tok/s  ttft  447 ms  up 99.7%
  4. digitalocean    221 tok/s  ttft  666 ms  up 100.0%
  5. particle        196 tok/s  ttft 1657 ms  up 100.0%
- 6. deepseek        193 tok/s  ttft 1662 ms  up 100.0%
+ 6. deepseek        193 tok/s  ttft 1662 ms  up 100.0%  (first-party)
  7. alibaba         179 tok/s  ttft 3205 ms  up 99.7%
  8. inference-net   158 tok/s  ttft  574 ms  up 100.0%
  9. parasail        155 tok/s  ttft  460 ms  up 100.0%
