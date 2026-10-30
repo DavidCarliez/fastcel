@@ -1,0 +1,43 @@
+{
+	"name": "fastcel",
+	"version": "0.1.0",
+	"description": "Oh My Pi plugin that routes Vercel AI Gateway requests to the provider with the highest live throughput",
+	"type": "module",
+	"license": "MIT",
+	"author": "David Carliez",
+	"homepage": "https://github.com/DavidCarliez/fastcel#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/DavidCarliez/fastcel.git"
+	},
+	"bugs": "https://github.com/DavidCarliez/fastcel/issues",
+	"keywords": [
+		"omp",
+		"oh-my-pi",
+		"omp-plugin",
+		"vercel",
+		"ai-gateway",
+		"llm",
+		"routing",
+		"throughput"
+	],
+	"files": [
+		"src",
+		"README.md",
+		"LICENSE"
+	],
+	"omp": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"scripts": {
+		"test": "bun test",
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@oh-my-pi/pi-coding-agent": "^18.14.0",
+		"@types/bun": "^1.4.4",
+		"typescript": "^7.0.2"
+	}
+}
