@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { setNativeRendering } from "@oh-my-pi/pi-tui/native/state";
 import fastcel from "../src/index.ts";
 
@@ -21,11 +22,12 @@ const gatewayModel = {
 const shutdowns: Handler[] = [];
 
 /** Load the extension against a recording stand-in and return its `before_provider_request` handler. */
-async function loadRequestHook(): Promise<Handler> {
+async function loadRequestHook(events = new EventBus()): Promise<Handler> {
 	const handlers = new Map<string, Handler>();
 	const recorder = {
 		setLabel() {},
 		logger: { warn() {} },
+		events,
 		on(event: string, handler: Handler) {
 			handlers.set(event, handler);
 		},
@@ -130,5 +132,29 @@ describe("before_provider_request", () => {
 			["widget", undefined],
 			["status", text],
 		]);
+	});
+
+	test("hands the pick to plugins drawing an indicator line, and takes it back when the last one stops", async () => {
+		fetchSpy.mockResolvedValue(Response.json({ data: { endpoints: ENDPOINTS } }));
+		const events = new EventBus();
+		const items: unknown[] = [];
+		events.on("indicator-line:query", () => events.emit("indicator-line:host", { id: "main" }));
+		events.on("indicator-line:item", item => items.push(item));
+		const shown: Array<[string, unknown]> = [];
+		const hook = await loadRequestHook(events);
+		// A subagent session loads its own copy of the host on the same bus.
+		events.emit("indicator-line:host", { id: "subagent" });
+
+		await hook({ type: "before_provider_request", payload: { model: gatewayModel.id } }, contextFor(gatewayModel, shown));
+		expect(shown).toEqual([]);
+		expect(items).toEqual([{ key: "fastcel", text: expect.stringContaining("baseten") }]);
+
+		events.emit("indicator-line:host", { id: "subagent", active: false });
+		expect(items).toHaveLength(1);
+		expect(shown).toEqual([]);
+
+		events.emit("indicator-line:host", { id: "main", active: false });
+		expect(items.at(-1)).toEqual({ key: "fastcel", text: undefined });
+		expect(shown).toEqual([["status", expect.stringContaining("baseten")]]);
 	});
 });

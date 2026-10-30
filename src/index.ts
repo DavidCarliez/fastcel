@@ -6,9 +6,17 @@ import { type ModelStats, StatsCache } from "./stats.ts";
 const GATEWAY_HOST = "ai-gateway.vercel.sh";
 const INDICATOR_KEY = "fastcel";
 const LOOKUP_TIMEOUT_MS = 4_000;
+/** A plugin drawing a shared indicator line announces `{ id, active }` here; `active: false` when it stops. */
+const LINE_HOST_CHANNEL = "indicator-line:host";
+/** Asks hosts that loaded earlier to announce themselves again. */
+const LINE_QUERY_CHANNEL = "indicator-line:query";
+/** Carries `{ key, text }` for the host to draw; `text: undefined` takes the item off the line. */
+const LINE_ITEM_CHANNEL = "indicator-line:item";
 
 type Model = NonNullable<ExtensionContext["model"]>;
 type JsonObject = Record<string, unknown>;
+/** `line`: a host plugin draws the pick; `widget`: a row under Tern's composer; `status`: the status line. */
+type Surface = "line" | "widget" | "status";
 
 /** Routing the user asked for: a `model@provider` selector or `compat.vercelGatewayRouting` in models.yml. */
 interface PinnedRouting {
@@ -22,32 +30,47 @@ export default async function fastcel(pi: ExtensionAPI): Promise<void> {
 		onError: (url, error) => pi.logger.warn("fastcel: could not load provider stats", { url, error: String(error) }),
 	});
 
-	// A plain terminal prints extension statuses on lines of their own under the status line. Tern's native
-	// view puts them last among the composer's facts and hides them first once usage figures fill that row,
-	// so while it renders, the pick goes on a row under the composer instead.
+	// Where the pick shows:
+	// - on the indicator line of a plugin that offers to carry it, such as Cover beside its lock: it announces
+	//   itself on `indicator-line:host`, and fastcel posts its text on `indicator-line:item` instead of drawing it;
+	// - otherwise, in Tern's native view, on a row under the composer, because Tern lists extension statuses
+	//   last among the composer's facts and hides them first once usage figures fill that row;
+	// - otherwise in the status line, where a plain terminal prints it on a line of its own.
 	const nativeRendering = await loadNativeRenderingState();
-	let shown: { text: string | undefined; native: boolean } = { text: undefined, native: false };
+	// Subagent sessions share the bus and load their own copy of a host, so hosts are counted by id.
+	const hosts = new Set<string>();
+	let shown: { text: string | undefined; surface: Surface } = { text: undefined, surface: "status" };
 	let indicatorCtx: ExtensionContext | undefined;
+	const put = (ctx: ExtensionContext, surface: Surface, text: string | undefined): void => {
+		if (surface === "line") pi.events.emit(LINE_ITEM_CHANNEL, { key: INDICATOR_KEY, text });
+		else if (surface === "widget") ctx.ui.setWidget(INDICATOR_KEY, text === undefined ? undefined : [text], { placement: "belowEditor" });
+		else ctx.ui.setStatus(INDICATOR_KEY, text);
+	};
 	const showIndicator = (ctx: ExtensionContext, text: string | undefined): void => {
 		indicatorCtx = ctx;
-		const native = nativeRendering?.isNativeRendering() ?? false;
-		if (shown.text === text && shown.native === native) return;
-		if (shown.text !== undefined) {
-			if (shown.native) ctx.ui.setWidget(INDICATOR_KEY, undefined);
-			else ctx.ui.setStatus(INDICATOR_KEY, undefined);
-		}
-		if (text !== undefined) {
-			if (native) ctx.ui.setWidget(INDICATOR_KEY, [text], { placement: "belowEditor" });
-			else ctx.ui.setStatus(INDICATOR_KEY, text);
-		}
-		shown = { text, native };
+		const surface: Surface = hosts.size > 0 ? "line" : nativeRendering?.isNativeRendering() ? "widget" : "status";
+		if (shown.text === text && shown.surface === surface) return;
+		if (shown.text !== undefined && shown.surface !== surface) put(ctx, shown.surface, undefined);
+		put(ctx, surface, text);
+		shown = { text, surface };
 	};
-	// Tern can open or close its native view while omp runs; move the pick along with it.
-	const stopWatchingNative = nativeRendering?.onNativeRenderingChange(() => {
+	// Tern can open or close its native view while omp runs, and a host can come or go: move the pick along.
+	const moveIndicator = (): void => {
 		const ctx = indicatorCtx;
 		ctx?.setTimeout(() => showIndicator(ctx, shown.text), 0);
+	};
+	const stopWatchingNative = nativeRendering?.onNativeRenderingChange(moveIndicator);
+	const stopWatchingHosts = pi.events.on(LINE_HOST_CHANNEL, data => {
+		if (!isObject(data) || typeof data.id !== "string") return;
+		if (data.active === false) hosts.delete(data.id);
+		else hosts.add(data.id);
+		moveIndicator();
 	});
-	pi.on("session_shutdown", () => stopWatchingNative?.());
+	pi.events.emit(LINE_QUERY_CHANNEL, undefined);
+	pi.on("session_shutdown", () => {
+		stopWatchingNative?.();
+		stopWatchingHosts();
+	});
 
 	// Warm the cache off the startup path so the first request does not wait, and show the pick early.
 	const showPickEarly = (ctx: ExtensionContext): void => {
@@ -63,10 +86,9 @@ export default async function fastcel(pi: ExtensionAPI): Promise<void> {
 		}, 0);
 	};
 	pi.on("session_start", (_event, ctx) => showPickEarly(ctx));
-	// OMP drops extension widgets when it starts or resumes another session; clear the status too and redraw.
+	// OMP drops extension widgets when it starts or resumes another session: clear the pick and draw it again.
 	pi.on("session_switch", (_event, ctx) => {
-		if (shown.text !== undefined && !shown.native) ctx.ui.setStatus(INDICATOR_KEY, undefined);
-		shown = { text: undefined, native: false };
+		showIndicator(ctx, undefined);
 		showPickEarly(ctx);
 	});
 
@@ -195,7 +217,7 @@ function pinnedRouting(model: Model): PinnedRouting | undefined {
 }
 
 /**
- * `fastcel → togetherai · 187 tok/s`. A provider that shares its slug with the model's maker, such as
+ * `togetherai · 187 tok/s`. A provider that shares its slug with the model's maker, such as
  * `deepseek` for `deepseek/…`, is the maker's own API; the label says so, since its name reads like the model's.
  */
 function indicatorText(
@@ -203,12 +225,12 @@ function indicatorText(
 	pinned: PinnedRouting | undefined,
 	ranking: RankedProvider[] | undefined,
 ): string | undefined {
-	if (pinned) return `fastcel: pinned ${describePin(pinned)}`;
+	if (pinned) return `pinned ${describePin(pinned)}`;
 	const leader = ranking?.[0];
 	if (!leader) return undefined;
 	const firstParty = leader.provider === modelId.split("/")[0] ? " (first-party)" : "";
 	const speed = leader.tps === undefined ? "" : ` · ${Math.round(leader.tps)} tok/s`;
-	return `fastcel → ${leader.provider}${firstParty}${speed}`;
+	return `${leader.provider}${firstParty}${speed}`;
 }
 
 function describePin(pinned: PinnedRouting): string {

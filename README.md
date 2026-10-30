@@ -46,13 +46,15 @@ You need a Vercel AI Gateway key configured for OMP's `vercel-ai-gateway` provid
 
 ## Use
 
-Pick any Vercel AI Gateway model, with `/model` or `--model vercel-ai-gateway/deepseek/deepseek-v4.1-flash`. fastcel shows the top of its current ranking under the status line, or, in Tern's native view, on a row under the composer:
+Pick any Vercel AI Gateway model, with `/model` or `--model vercel-ai-gateway/deepseek/deepseek-v4.1-flash`. fastcel shows the top of its current ranking, the provider and its speed:
 
 ```
-fastcel → runware · 370 tok/s
+subconscious · 445 tok/s
 ```
 
-When the model's maker serves it from its own API, that provider has the maker's name, so the line marks it first-party. `fastcel → deepseek (first-party) · 191 tok/s` means DeepSeek's own API, not the DeepSeek model.
+In a plain terminal this sits under the status line. In Tern's native view it gets a row under the composer, since Tern hides extension statuses there once the status bar fills up. With [Cover](https://github.com/DavidCarliez/cover) installed it joins Cover's lock on one line: `🔓  subconscious · 445 tok/s`.
+
+When the model's maker serves it from its own API, that provider has the maker's name, so the line marks it first-party. `deepseek (first-party) · 191 tok/s` means DeepSeek's own API, not the DeepSeek model.
 
 A conversation that started earlier can still be on another provider, as described above. `/fastcel` shows where the last reply actually went.
 
@@ -94,6 +96,18 @@ Last reply was served by runware.
 The last line comes from Vercel's generation lookup, which uses your gateway key. Vercel publishes that record up to a minute after the reply; until then `/fastcel` says so.
 
 To turn fastcel off, run `omp plugin disable fastcel`.
+
+### Sharing a line with another plugin
+
+A plugin that draws a line of its own can carry fastcel's text, as Cover does next to its lock. The plugins talk over OMP's shared event bus, `pi.events`:
+
+| Channel                | Payload                                | Sent by                                                           |
+| ---------------------- | -------------------------------------- | ----------------------------------------------------------------- |
+| `indicator-line:host`  | `{ id: string, active: boolean }`      | The drawing plugin, when it loads, when asked, and when it stops. |
+| `indicator-line:query` | none                                   | fastcel, when it loads, to find a plugin that loaded first.       |
+| `indicator-line:item`  | `{ key: "fastcel", text: string \| undefined }` | fastcel, whenever its text changes; `undefined` removes it.       |
+
+While at least one plugin is active on `indicator-line:host`, fastcel posts its text there instead of drawing it. Use a unique `id` per loaded copy: subagent sessions share the bus and load their own copy of each plugin.
 
 ## Develop
 
