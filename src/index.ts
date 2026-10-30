@@ -1,7 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import type * as NativeRenderingState from "@oh-my-pi/pi-tui/native/state";
-import { type RankedProvider, rankProviders } from "./ranking.ts";
-import { type ModelStats, StatsCache } from "./stats.ts";
+import { plainReport, RankingPanel, type RankingReport } from "./panel.ts";
+import { isFirstParty, type RankedProvider, rankProviders } from "./ranking.ts";
+import { StatsCache } from "./stats.ts";
 
 const GATEWAY_HOST = "ai-gateway.vercel.sh";
 const INDICATOR_KEY = "fastcel";
@@ -160,17 +161,23 @@ export default async function fastcel(pi: ExtensionAPI): Promise<void> {
 				tools: true,
 				contextTokens: isCurrent ? ctx.getContextUsage()?.tokens : undefined,
 			});
-			const lines = formatRanking(modelId, modelStats, ranking);
+			const notes: string[] = [];
+			if (ranking.length === 1) notes.push("Only one provider serves this model, so there is nothing to choose.");
 			if (isCurrent) {
 				const pinned = pinnedRouting(current);
-				if (pinned) lines.push(`Routing pinned by your config (${describePin(pinned)}); fastcel leaves it as is.`);
+				if (pinned) notes.push(`Routing is pinned by your config (${describePin(pinned)}); fastcel leaves it as is.`);
 				const served = await lastServedProvider(ctx, current, origin).catch(() => undefined);
-				if (served && "provider" in served) lines.push(`Last reply was served by ${served.provider}.`);
+				if (served && "provider" in served) notes.push(`Last reply was served by ${served.provider}.`);
 				if (served && "pending" in served) {
-					lines.push("Vercel has not published which provider served the last reply yet; ask again in a minute.");
+					notes.push("Vercel has not published which provider served the last reply yet; ask again in a minute.");
 				}
 			}
-			ctx.ui.notify(lines.join("\n"), "info");
+			const report: RankingReport = { modelId, fetchedAt: modelStats.fetchedAt, ranking, notes };
+			if (ctx.mode === "tui") {
+				await ctx.ui.custom<void>((_tui, theme, _keybindings, done) => new RankingPanel(report, theme, () => done()));
+			} else {
+				ctx.ui.notify(plainReport(report), "info");
+			}
 		},
 	});
 }
@@ -228,7 +235,7 @@ function indicatorText(
 	if (pinned) return `pinned ${describePin(pinned)}`;
 	const leader = ranking?.[0];
 	if (!leader) return undefined;
-	const firstParty = leader.provider === modelId.split("/")[0] ? " (first-party)" : "";
+	const firstParty = isFirstParty(leader.provider, modelId) ? " (first-party)" : "";
 	const speed = leader.tps === undefined ? "" : ` · ${Math.round(leader.tps)} tok/s`;
 	return `${leader.provider}${firstParty}${speed}`;
 }
@@ -237,24 +244,6 @@ function describePin(pinned: PinnedRouting): string {
 	return [pinned.only && `only ${pinned.only.join(", ")}`, pinned.order && `order ${pinned.order.join(", ")}`]
 		.filter(Boolean)
 		.join("; ");
-}
-
-function formatRanking(modelId: string, modelStats: ModelStats, ranking: RankedProvider[]): string[] {
-	const ageMinutes = Math.floor((Date.now() - modelStats.fetchedAt) / 60_000);
-	const width = Math.max(...ranking.map(entry => entry.provider.length));
-	const lines = [`fastcel · ${modelId} · live stats, ${ageMinutes < 1 ? "just fetched" : `${ageMinutes} min old`}`];
-	for (const [index, entry] of ranking.entries()) {
-		const tps = entry.tps === undefined ? "  n/a tok/s" : `${String(Math.round(entry.tps)).padStart(5)} tok/s`;
-		const ttft = entry.ttftMs === undefined ? "n/a" : `${Math.round(entry.ttftMs)} ms`;
-		const uptime = entry.uptime15m === undefined ? "n/a" : `${entry.uptime15m.toFixed(1)}%`;
-		const demotion = entry.demotion ? `  [${entry.demotion}]` : "";
-		const firstParty = entry.provider === modelId.split("/")[0] ? "  (first-party)" : "";
-		lines.push(
-			`${String(index + 1).padStart(2)}. ${entry.provider.padEnd(width)} ${tps}  ttft ${ttft.padStart(7)}  up ${uptime}${demotion}${firstParty}`,
-		);
-	}
-	if (ranking.length === 1) lines.push("Only one provider serves this model; there is nothing to choose.");
-	return lines;
 }
 
 /**

@@ -38,6 +38,11 @@ export interface RankedProvider {
 /** Uptime under this percentage over the last 15 minutes marks a provider as degraded. */
 export const DEGRADED_UPTIME_PERCENT = 90;
 
+/** Whether a provider is the model maker's own API: its slug is the model's creator, as `deepseek` for `deepseek/…`. */
+export function isFirstParty(provider: string, modelId: string): boolean {
+	return provider === modelId.split("/")[0];
+}
+
 /**
  * Order a model's providers fastest first by live median throughput.
  *

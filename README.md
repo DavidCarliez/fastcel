@@ -1,6 +1,8 @@
 # fastcel
 
-An [Oh My Pi](https://omp.sh) plugin that starts each Vercel AI Gateway conversation on the fastest provider for its model.
+An [Oh My Pi](https://omp.sh) plugin that starts each Vercel AI Gateway conversation on the fastest provider for its model. It works in any terminal and adapts to [Tern](https://stencil.so/tern)'s native view.
+
+![/fastcel ranking the providers of deepseek/deepseek-v4.1-flash, fastest first, with a bar for each one's speed](assets/fastcel-panel.png)
 
 Vercel AI Gateway serves many models through several providers, and their speeds differ a lot. `deepseek/deepseek-v4.1-flash` has 22 providers. On one afternoon the fastest, runware, produced a median of 370 tokens per second over the last hour, and the slowest, vertex, 24. Left to choose, the gateway sent two test requests to baseten (239 tok/s). With fastcel the same request went to runware.
 
@@ -52,7 +54,11 @@ Pick any Vercel AI Gateway model, with `/model` or `--model vercel-ai-gateway/de
 subconscious · 445 tok/s
 ```
 
-In a plain terminal this sits under the status line. In Tern's native view it gets a row under the composer, since Tern hides extension statuses there once the status bar fills up. With [Cover](https://github.com/DavidCarliez/cover) installed it joins Cover's lock on one line: `🔓  subconscious · 445 tok/s`.
+Where it shows depends on the terminal:
+
+- **A plain terminal**: under the status line.
+- **Tern**: on a row of its own under the composer. Tern hides extension statuses once the status bar fills up with usage figures, so fastcel draws its own row there instead.
+- **With [Cover](https://github.com/DavidCarliez/cover) installed**: next to Cover's lock, on one line, in either terminal: `🔓  subconscious · 445 tok/s`.
 
 When the model's maker serves it from its own API, that provider has the maker's name, so the line marks it first-party. `deepseek (first-party) · 191 tok/s` means DeepSeek's own API, not the DeepSeek model.
 
@@ -64,36 +70,11 @@ A conversation that started earlier can still be on another provider, as describ
 | `/fastcel <model>` | Ranks the providers of any gateway model, e.g. `/fastcel zai/glm-5.1`.              |
 | `/fastcel refresh` | Drops cached stats and fetches them again.                                           |
 
-`/fastcel` a minute after a reply from `deepseek/deepseek-v4.1-flash`:
+`/fastcel` opens a table of the model's providers, fastest first, with each provider's speed, time to first token and uptime over the last 15 minutes. A note marks the first-party provider and says why a provider was moved down the list. Under the table, a line says which provider served the last reply. Any key closes it.
 
-```
-fastcel · deepseek/deepseek-v4.1-flash · live stats, 1 min old
- 1. runware         370 tok/s  ttft 1151 ms  up 100.0%
- 2. togetherai      291 tok/s  ttft  309 ms  up 100.0%
- 3. baseten         239 tok/s  ttft  447 ms  up 99.7%
- 4. digitalocean    221 tok/s  ttft  666 ms  up 100.0%
- 5. particle        196 tok/s  ttft 1657 ms  up 100.0%
- 6. deepseek        193 tok/s  ttft 1662 ms  up 100.0%  (first-party)
- 7. alibaba         179 tok/s  ttft 3205 ms  up 99.7%
- 8. inference-net   158 tok/s  ttft  574 ms  up 100.0%
- 9. parasail        155 tok/s  ttft  460 ms  up 100.0%
-10. fireworks       152 tok/s  ttft 1176 ms  up 100.0%
-11. gmicloud        148 tok/s  ttft 1171 ms  up 100.0%
-12. novita          148 tok/s  ttft 4133 ms  up 100.0%
-13. tencent         144 tok/s  ttft 1518 ms  up 100.0%
-14. morph           133 tok/s  ttft 1638 ms  up 100.0%
-15. pareto          123 tok/s  ttft 1360 ms  up 100.0%
-16. wafer           116 tok/s  ttft  849 ms  up 99.8%
-17. boundless       115 tok/s  ttft  568 ms  up 100.0%
-18. modal            88 tok/s  ttft  925 ms  up 100.0%
-19. relace           49 tok/s  ttft  966 ms  up 100.0%
-20. deepinfra        38 tok/s  ttft  974 ms  up 100.0%
-21. runinfra         33 tok/s  ttft 2564 ms  up 100.0%
-22. vertex           24 tok/s  ttft  499 ms  up 100.0%
-Last reply was served by runware.
-```
+Tern and a plain terminal draw the same table, as in the screenshot at the top. Clients without the interactive TUI, such as RPC hosts, get it as plain text.
 
-The last line comes from Vercel's generation lookup, which uses your gateway key. Vercel publishes that record up to a minute after the reply; until then `/fastcel` says so.
+The served-by line comes from Vercel's generation lookup, which uses your gateway key. Vercel publishes that record up to a minute after the reply; until then `/fastcel` says so.
 
 To turn fastcel off, run `omp plugin disable fastcel`.
 
@@ -118,7 +99,7 @@ bun run typecheck
 omp -e ./src/index.ts --model vercel-ai-gateway/deepseek/deepseek-v4.1-flash
 ```
 
-`src/ranking.ts` orders providers, `src/stats.ts` fetches and caches the endpoint stats, and `src/index.ts` wires both into OMP.
+`src/ranking.ts` orders providers, `src/stats.ts` fetches and caches the endpoint stats, `src/panel.ts` draws `/fastcel`, and `src/index.ts` wires them into OMP.
 
 ## License
 
