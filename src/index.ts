@@ -1,9 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import type * as NativeRenderingState from "@oh-my-pi/pi-tui/native/state";
 import { type RankedProvider, rankProviders } from "./ranking.ts";
 import { type ModelStats, StatsCache } from "./stats.ts";
 
 const GATEWAY_HOST = "ai-gateway.vercel.sh";
-const STATUS_KEY = "fastcel";
+const INDICATOR_KEY = "fastcel";
 const LOOKUP_TIMEOUT_MS = 4_000;
 
 type Model = NonNullable<ExtensionContext["model"]>;
@@ -15,40 +16,74 @@ interface PinnedRouting {
 	order?: string[];
 }
 
-export default function fastcel(pi: ExtensionAPI): void {
+export default async function fastcel(pi: ExtensionAPI): Promise<void> {
 	pi.setLabel("fastcel");
 	const stats = new StatsCache({
 		onError: (url, error) => pi.logger.warn("fastcel: could not load provider stats", { url, error: String(error) }),
 	});
 
-	pi.on("session_start", (_event, ctx) => {
+	// A plain terminal prints extension statuses on lines of their own under the status line. Tern's native
+	// view puts them last among the composer's facts and hides them first once usage figures fill that row,
+	// so while it renders, the pick goes on a row under the composer instead.
+	const nativeRendering = await loadNativeRenderingState();
+	let shown: { text: string | undefined; native: boolean } = { text: undefined, native: false };
+	let indicatorCtx: ExtensionContext | undefined;
+	const showIndicator = (ctx: ExtensionContext, text: string | undefined): void => {
+		indicatorCtx = ctx;
+		const native = nativeRendering?.isNativeRendering() ?? false;
+		if (shown.text === text && shown.native === native) return;
+		if (shown.text !== undefined) {
+			if (shown.native) ctx.ui.setWidget(INDICATOR_KEY, undefined);
+			else ctx.ui.setStatus(INDICATOR_KEY, undefined);
+		}
+		if (text !== undefined) {
+			if (native) ctx.ui.setWidget(INDICATOR_KEY, [text], { placement: "belowEditor" });
+			else ctx.ui.setStatus(INDICATOR_KEY, text);
+		}
+		shown = { text, native };
+	};
+	// Tern can open or close its native view while omp runs; move the pick along with it.
+	const stopWatchingNative = nativeRendering?.onNativeRenderingChange(() => {
+		const ctx = indicatorCtx;
+		ctx?.setTimeout(() => showIndicator(ctx, shown.text), 0);
+	});
+	pi.on("session_shutdown", () => stopWatchingNative?.());
+
+	// Warm the cache off the startup path so the first request does not wait, and show the pick early.
+	const showPickEarly = (ctx: ExtensionContext): void => {
 		const model = ctx.models.current();
 		const origin = gatewayOrigin(model);
 		if (!model || !origin || ctx.agent.kind !== "main") return;
-		// Warm the cache off the startup path so the first request does not wait, and show the pick early.
 		ctx.setTimeout(async () => {
 			const pinned = pinnedRouting(model);
 			const modelStats = pinned ? undefined : await stats.get(endpointsUrl(origin, model.id));
 			if (!sameModel(ctx.models.current(), model)) return;
 			const ranking = modelStats && rankProviders(modelStats.endpoints, { tools: true });
-			ctx.ui.setStatus(STATUS_KEY, statusText(pinned, ranking));
+			showIndicator(ctx, indicatorText(pinned, ranking));
 		}, 0);
+	};
+	pi.on("session_start", (_event, ctx) => showPickEarly(ctx));
+	// OMP drops extension widgets when it starts or resumes another session; clear the status too and redraw.
+	pi.on("session_switch", (_event, ctx) => {
+		if (shown.text !== undefined && !shown.native) ctx.ui.setStatus(INDICATOR_KEY, undefined);
+		shown = { text: undefined, native: false };
+		showPickEarly(ctx);
 	});
 
 	pi.on("before_provider_request", async (event, ctx) => {
 		const model = ctx.model;
 		const origin = gatewayOrigin(model);
-		const ownsStatus = ctx.agent.kind === "main" && sameModel(ctx.models.current(), model);
+		const ownsIndicator = ctx.agent.kind === "main" && sameModel(ctx.models.current(), model);
 		const payload = event.payload;
 		if (!model || !origin || !isObject(payload)) {
-			if (ownsStatus) ctx.ui.setStatus(STATUS_KEY, undefined);
+			if (ownsIndicator) showIndicator(ctx, undefined);
 			return;
 		}
 		const providerOptions = isObject(payload.providerOptions) ? payload.providerOptions : {};
 		const gateway = isObject(providerOptions.gateway) ? providerOptions.gateway : {};
 		if (gateway.only !== undefined || gateway.order !== undefined) {
 			// OMP or another extension already routed this request.
-			if (ownsStatus) ctx.ui.setStatus(STATUS_KEY, undefined);
+			if (ownsIndicator) showIndicator(ctx, undefined);
 			return;
 		}
 
@@ -64,7 +99,7 @@ export default function fastcel(pi: ExtensionAPI): void {
 					contextTokens: ctx.getContextUsage()?.tokens,
 				});
 		}
-		if (ownsStatus) ctx.ui.setStatus(STATUS_KEY, statusText(pinned, ranking));
+		if (ownsIndicator) showIndicator(ctx, indicatorText(pinned, ranking));
 
 		// With fewer than two providers there is nothing to choose; Vercel's default is the only option.
 		const routing = pinned ?? (ranking && ranking.length > 1 ? { order: ranking.map(entry => entry.provider) } : undefined);
@@ -118,6 +153,18 @@ export default function fastcel(pi: ExtensionAPI): void {
 	});
 }
 
+/**
+ * OMP's process-wide flag for Tern's native view. It is an internal OMP module that another OMP version may
+ * move, so it is imported at runtime and its absence only means the pick stays in the status line.
+ */
+async function loadNativeRenderingState(): Promise<typeof NativeRenderingState | undefined> {
+	try {
+		return await import("@oh-my-pi/pi-tui/native/state");
+	} catch {
+		return undefined;
+	}
+}
+
 /** Origin of Vercel AI Gateway when the model is served through it. */
 function gatewayOrigin(model: Model | undefined): string | undefined {
 	if (!model?.baseUrl || !URL.canParse(model.baseUrl)) return undefined;
@@ -147,7 +194,7 @@ function pinnedRouting(model: Model): PinnedRouting | undefined {
 	return undefined;
 }
 
-function statusText(pinned: PinnedRouting | undefined, ranking: RankedProvider[] | undefined): string | undefined {
+function indicatorText(pinned: PinnedRouting | undefined, ranking: RankedProvider[] | undefined): string | undefined {
 	if (pinned) return `fastcel: pinned ${describePin(pinned)}`;
 	const leader = ranking?.[0];
 	if (!leader) return undefined;

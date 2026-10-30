@@ -46,7 +46,7 @@ You need a Vercel AI Gateway key configured for OMP's `vercel-ai-gateway` provid
 
 ## Use
 
-Pick any Vercel AI Gateway model, with `/model` or `--model vercel-ai-gateway/deepseek/deepseek-v4.1-flash`. The status bar shows the top of fastcel's current ranking:
+Pick any Vercel AI Gateway model, with `/model` or `--model vercel-ai-gateway/deepseek/deepseek-v4.1-flash`. fastcel shows the top of its current ranking under the status line, or, in Tern's native view, on a row under the composer:
 
 ```
 fastcel → runware 370 tok/s
