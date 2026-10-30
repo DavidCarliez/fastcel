@@ -195,7 +195,7 @@ function pinnedRouting(model: Model): PinnedRouting | undefined {
 }
 
 /**
- * `fastcel → provider togetherai · 187 tok/s`. A provider that shares its slug with the model's maker, such as
+ * `fastcel → togetherai · 187 tok/s`. A provider that shares its slug with the model's maker, such as
  * `deepseek` for `deepseek/…`, is the maker's own API; the label says so, since its name reads like the model's.
  */
 function indicatorText(
@@ -208,7 +208,7 @@ function indicatorText(
 	if (!leader) return undefined;
 	const firstParty = leader.provider === modelId.split("/")[0] ? " (first-party)" : "";
 	const speed = leader.tps === undefined ? "" : ` · ${Math.round(leader.tps)} tok/s`;
-	return `fastcel → provider ${leader.provider}${firstParty}${speed}`;
+	return `fastcel → ${leader.provider}${firstParty}${speed}`;
 }
 
 function describePin(pinned: PinnedRouting): string {
